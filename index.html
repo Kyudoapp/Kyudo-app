@@ -28,13 +28,17 @@
 </style>
 </head>
 <body>
-<iframe id="app" title="農工大弓道部" allow="microphone; clipboard-write"></iframe>
+<!-- credentialless: スマホに入っているGoogleアカウントの情報をアプリ本体に送らない
+     （大学アカウントの組織設定や複数ログインで「ファイルを開くことができません」になるのを防ぐ） -->
+<iframe id="app" title="農工大弓道部" allow="microphone; clipboard-write" credentialless></iframe>
+<div id="dbg" hidden style="position:fixed;left:0;right:0;bottom:0;max-height:40%;overflow:auto;background:rgba(0,0,0,.85);color:#a7f3d0;font:11px/1.5 monospace;padding:6px 8px;z-index:50;white-space:pre-wrap"></div>
 
 <div class="layer" id="splash">
   <img src="icons/icon-192.png" alt="">
   <div class="ttl">農工大弓道部</div>
   <div class="sub" id="splash-sub">読み込み中…</div>
   <button class="btn" id="splash-retry" hidden onclick="reloadApp()">再読み込み</button>
+  <div class="sub" id="splash-diag" style="font-size:11px;color:rgba(255,255,255,.5)"></div>
 </div>
 
 <div class="layer" id="login" hidden>
@@ -66,8 +70,44 @@ const CONFIG = {
   APP_ORIGIN: /^https:\/\/[a-z0-9-]+\.googleusercontent\.com$/
 };
 const SKEY = 'kyudo_session';
+const APFX = 'app:'; // アプリ本体から頼まれて保存する物の印
 const frame = document.getElementById('app');
 let appWin = null, appOrigin = '', gsiReady = false, splashTimer = null;
+// 開けない時の原因調査用（「時間がかかっています」の下に表示する）
+const diag = { load: 0, got: [], ng: [], err: [] };
+const DEBUG = /[?&]debug=1/.test(location.search); // URLの末尾に ?debug=1 を付けると画面下に記録を出す
+frame.addEventListener('load', () => { diag.load++; logDbg('iframe load'); });
+function logDbg(t){
+  if(!DEBUG) return;
+  const d = $('dbg'); d.hidden = false;
+  d.textContent += new Date().toLocaleTimeString() + ' ' + t + '\n'; d.scrollTop = d.scrollHeight;
+}
+function showDiag(){
+  $('splash-diag').textContent = '診断: 読込' + diag.load + '回 / 受信 ' + (diag.got.slice(-6).join(',') || 'なし') +
+    ' / 拒否 ' + (diag.ng.join(',') || 'なし') + ' / ' + (navigator.onLine ? 'オンライン' : 'オフライン') +
+    ' / ' + ('credentialless' in HTMLIFrameElement.prototype ? 'CL対応' : 'CL非対応') +
+    (diag.err.length ? ' / エラー ' + diag.err.slice(-2).join(' | ') : '');
+}
+/* アプリ本体の保存内容（外枠の端末保存に置いておく） */
+function appStore(){
+  const o = {};
+  try{
+    for(let i = 0; i < localStorage.length; i++){
+      const k = localStorage.key(i);
+      if(k && k.indexOf(APFX) === 0) o[k.slice(APFX.length)] = localStorage.getItem(k);
+    }
+  }catch(e){}
+  return o;
+}
+function appStoreSet(k, v){
+  if(typeof k !== 'string' || !k || k.length > 100) return;
+  try{ v == null ? localStorage.removeItem(APFX + k) : localStorage.setItem(APFX + k, String(v)); }
+  catch(e){ // 容量オーバー：大きいキャッシュだけ諦める（データ本体はサーバーにある）
+    if(k === 'kudo_cache'){ try{ localStorage.removeItem(APFX + k); }catch(_){} }
+    logDbg('store失敗 ' + k);
+  }
+}
+function appStoreClear(){ Object.keys(appStore()).forEach(k => { try{ localStorage.removeItem(APFX + k); }catch(e){} }); }
 
 function $(id){ return document.getElementById(id); }
 function getSession(){ try{ return localStorage.getItem(SKEY) || ''; }catch(e){ return ''; } }
@@ -80,7 +120,7 @@ function reloadApp(){
   $('splash-sub').textContent = '読み込み中…'; $('splash-retry').hidden = true;
   clearTimeout(splashTimer);
   splashTimer = setTimeout(() => { // 長くかかっている時は再読み込みを出す
-    $('splash-sub').textContent = '時間がかかっています…'; $('splash-retry').hidden = false;
+    $('splash-sub').textContent = '時間がかかっています…'; $('splash-retry').hidden = false; showDiag();
   }, 20000);
   frame.src = CONFIG.APP_URL + (CONFIG.APP_URL.indexOf('?') >= 0 ? '&' : '?') + 'shell=1';
 }
@@ -100,16 +140,21 @@ function send(m){ if(appWin) appWin.postMessage(Object.assign({ kyudo: 1 }, m), 
 
 window.addEventListener('message', ev => {
   const m = ev.data;
-  if(!m || m.kyudo !== 1 || !fromOurApp(ev)) return;
+  if(!m || m.kyudo !== 1) return;
+  if(!fromOurApp(ev)){ diag.ng.push(ev.origin); logDbg('拒否 ' + ev.origin); return; }
+  diag.got.push(m.type);
+  if(m.type !== 'store') logDbg('受信 ' + m.type + (m.message ? ' ' + m.message : ''));
   appWin = ev.source; appOrigin = ev.origin;
   switch(m.type){
-    case 'hello':         hideSplash(); send({ type: 'auth', session: getSession() }); break;
+    case 'hello':         hideSplash(); send({ type: 'auth', session: getSession(), store: appStore() }); break;
+    case 'store':         appStoreSet(m.key, m.value); break;
+    case 'error':         diag.err.push(String(m.message || '').slice(0, 120)); break;
     case 'need-login':    showLogin(''); break;
     case 'session':       setSession(m.session); hideLogin(); break;
     case 'clear-session': setSession(''); break;
     case 'login-error':   showLogin(m.message || 'ログインできませんでした'); break;
     case 'logout':
-      setSession('');
+      setSession(''); appStoreClear(); // 次に別の人が使っても前の人のデータが残らないように
       try{ google.accounts.id.disableAutoSelect(); }catch(e){}
       reloadApp(); break;
   }
