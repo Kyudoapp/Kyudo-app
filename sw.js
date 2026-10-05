@@ -1,7 +1,7 @@
 /* 外枠アプリのファイルを端末に保存して、すぐ開けるようにする。
    アプリ本体（GAS）や Google のログイン部品には触らない。
    外枠を更新したら CACHE の番号を1つ上げる。 */
-const CACHE = 'kyudo-shell-v1';
+const CACHE = 'kyudo-shell-v3';
 const FILES = ['./', './index.html', './manifest.webmanifest',
   './icons/icon-192.png', './icons/icon-512.png', './icons/icon-maskable-512.png', './icons/apple-touch-icon.png'];
 
