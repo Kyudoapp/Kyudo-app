@@ -6,8 +6,8 @@
 <title>農工大弓道部</title>
 <meta name="theme-color" content="#1a2744">
 <link rel="manifest" href="manifest.webmanifest">
-<link rel="icon" href="icons/k2-192.png">
-<link rel="apple-touch-icon" href="icons/k2-apple-180.png">
+<link rel="icon" href="k2-192.png">
+<link rel="apple-touch-icon" href="k2-apple-180.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -35,7 +35,7 @@
 <div id="dbg" hidden style="position:fixed;left:0;right:0;bottom:0;max-height:40%;overflow:auto;background:rgba(0,0,0,.85);color:#a7f3d0;font:11px/1.5 monospace;padding:6px 8px;z-index:50;white-space:pre-wrap"></div>
 
 <div class="layer" id="splash">
-  <img src="icons/k2-192.png" alt="">
+  <img src="k2-192.png" alt="">
   <div class="ttl">農工大弓道部</div>
   <div class="sub" id="splash-sub">読み込み中…</div>
   <button class="btn" id="splash-retry" hidden onclick="reloadApp()">再読み込み</button>
@@ -43,7 +43,7 @@
 </div>
 
 <div class="layer" id="login" hidden>
-  <img src="icons/k2-192.png" alt="">
+  <img src="k2-192.png" alt="">
   <div class="ttl">農工大弓道部</div>
   <div class="sub">大学のGoogleアカウント<br>（@st.go.tuat.ac.jp）でログインしてください</div>
   <div id="gbtn"></div>
@@ -51,7 +51,7 @@
 </div>
 
 <div class="layer" id="pushask" hidden style="background:rgba(10,18,40,.94)">
-  <img src="icons/k2-192.png" alt="">
+  <img src="k2-192.png" alt="">
   <div class="ttl" id="pushask-title">通知を受け取りますか？</div>
   <div class="sub">部室の返信・アドバイス、お知らせ、<br>道場当番の前の連絡が、この端末に届きます。<br>届く内容はアプリの「設定」で選べます。</div>
   <button class="btn" style="background:#fff;color:#1a2744;font-weight:700;padding:12px 28px" onclick="pushSubscribe()">通知を受け取る</button>
@@ -59,14 +59,14 @@
 </div>
 
 <div id="installbar" hidden style="position:fixed;left:8px;right:8px;bottom:calc(8px + env(safe-area-inset-bottom,0px));z-index:20;background:#111;color:#fff;border-radius:14px;padding:10px 12px;display:flex;align-items:center;gap:10px;box-shadow:0 6px 20px rgba(0,0,0,.35);font-size:13px;line-height:1.5">
-  <img src="icons/k2-192.png" alt="" style="width:36px;height:36px;border-radius:8px;flex-shrink:0">
+  <img src="k2-192.png" alt="" style="width:36px;height:36px;border-radius:8px;flex-shrink:0">
   <div id="installbar-text" style="flex:1;min-width:0"></div>
   <button class="btn" id="installbar-btn" style="background:#fff;color:#111;font-weight:700;padding:8px 14px;flex-shrink:0" onclick="doInstall()">インストール</button>
   <button class="btn" style="background:transparent;padding:6px 8px;flex-shrink:0" onclick="closeInstall()" aria-label="閉じる">✕</button>
 </div>
 
 <div class="layer" id="offline" hidden>
-  <img src="icons/k2-192.png" alt="">
+  <img src="k2-192.png" alt="">
   <div class="ttl">オフラインです</div>
   <div class="sub">電波の良い場所で、もう一度お試しください</div>
   <button class="btn" onclick="reloadApp()">再試行</button>

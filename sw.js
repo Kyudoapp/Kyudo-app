@@ -1,9 +1,9 @@
 /* 外枠アプリのファイルを端末に保存して、すぐ開けるようにする。
    アプリ本体（GAS）や Google のログイン部品には触らない。
    外枠を更新したら CACHE の番号を1つ上げる。 */
-const CACHE = 'kyudo-shell-v7';
+const CACHE = 'kyudo-shell-v8';
 const FILES = ['./', './index.html', './manifest.webmanifest',
-  './icons/k2-192.png', './icons/k2-512.png', './icons/k2-maskable-512.png', './icons/k2-apple-180.png', './icons/k2-badge-72.png'];
+  './k2-192.png', './k2-512.png', './k2-maskable-512.png', './k2-apple-180.png', './k2-badge-72.png'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(FILES.map(f => new Request(f, { cache: 'reload' })))).then(() => self.skipWaiting()));
@@ -38,7 +38,7 @@ self.addEventListener('fetch', e => {
 self.addEventListener('push', e => {
   let d = {};
   try{ d = e.data ? e.data.json() : {}; }catch(_){ d = { body: e.data ? e.data.text() : '' }; }
-  const opt = { body: d.body || '', icon: 'icons/k2-192.png', badge: 'icons/k2-badge-72.png', data: { url: d.url || './' } };
+  const opt = { body: d.body || '', icon: 'k2-192.png', badge: 'k2-badge-72.png', data: { url: d.url || './' } };
   if(d.tag){ opt.tag = d.tag + '-' + Date.now(); } // 同じ種類でも1件ずつ並べる
   e.waitUntil(self.registration.showNotification(d.title || '農工大弓道部', opt));
 });
