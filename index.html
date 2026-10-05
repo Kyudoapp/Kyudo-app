@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>農工大弓道部</title>
+<meta name="theme-color" content="#1a2744">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="弓道部">
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%;background:#1a2744;overflow:hidden}
+  body{font-family:-apple-system,'Hiragino Sans','Noto Sans JP',sans-serif;color:#fff}
+  #app{position:fixed;left:0;right:0;bottom:0;top:env(safe-area-inset-top,0px);width:100%;height:calc(100% - env(safe-area-inset-top,0px));border:0;background:#f0eeeb}
+  .layer{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;background:#1a2744;padding:24px;text-align:center;z-index:10}
+  .layer[hidden]{display:none}
+  .layer img{width:88px;height:88px;border-radius:20px}
+  .ttl{font-size:18px;font-weight:700}
+  .sub{font-size:13px;color:rgba(255,255,255,.75);line-height:1.7}
+  .msg{font-size:13px;color:#fecaca;line-height:1.6;min-height:1.6em;max-width:320px}
+  .btn{background:rgba(255,255,255,.15);color:#fff;border:0;border-radius:999px;padding:10px 22px;font-size:14px;cursor:pointer}
+  #gbtn{min-height:44px}
+</style>
+</head>
+<body>
+<iframe id="app" title="農工大弓道部" allow="microphone; clipboard-write"></iframe>
+
+<div class="layer" id="splash">
+  <img src="icons/icon-192.png" alt="">
+  <div class="ttl">農工大弓道部</div>
+  <div class="sub" id="splash-sub">読み込み中…</div>
+  <button class="btn" id="splash-retry" hidden onclick="reloadApp()">再読み込み</button>
+</div>
+
+<div class="layer" id="login" hidden>
+  <img src="icons/icon-192.png" alt="">
+  <div class="ttl">農工大弓道部</div>
+  <div class="sub">大学のGoogleアカウント<br>（@st.go.tuat.ac.jp）でログインしてください</div>
+  <div id="gbtn"></div>
+  <div class="msg" id="login-msg"></div>
+</div>
+
+<div class="layer" id="offline" hidden>
+  <img src="icons/icon-192.png" alt="">
+  <div class="ttl">オフラインです</div>
+  <div class="sub">電波の良い場所で、もう一度お試しください</div>
+  <button class="btn" onclick="reloadApp()">再試行</button>
+</div>
+
+<script>
+/* ================================================================
+   農工大弓道部アプリ 外枠（ホーム画面アプリ / PWA）
+   ・Googleログインはこのページで行い、アプリ本体（GAS）には合言葉を渡す
+   ・アプリ本体は下の APP_URL を iframe で表示する
+   設定するのは CONFIG の APP_URL だけ（README参照）
+================================================================ */
+const CONFIG = {
+  APP_URL: 'https://script.google.com/macros/s/ここにデプロイID/exec',
+  CLIENT_ID: '273532915557-obdrl7l2kpaq2dsnuo35k44rph34d5ar.apps.googleusercontent.com',
+  // アプリ本体（GASの画面）が動く住所。GASは googleusercontent.com の中で動く
+  APP_ORIGIN: /^https:\/\/[a-z0-9-]+\.googleusercontent\.com$/
+};
+const SKEY = 'kyudo_session';
+const frame = document.getElementById('app');
+let appWin = null, appOrigin = '', gsiReady = false, splashTimer = null;
+
+function $(id){ return document.getElementById(id); }
+function getSession(){ try{ return localStorage.getItem(SKEY) || ''; }catch(e){ return ''; } }
+function setSession(v){ try{ v ? localStorage.setItem(SKEY, v) : localStorage.removeItem(SKEY); }catch(e){} }
+
+/* アプリ本体を読み込む */
+function reloadApp(){
+  if(!navigator.onLine){ $('offline').hidden = false; return; }
+  $('offline').hidden = true; $('splash').hidden = false;
+  $('splash-sub').textContent = '読み込み中…'; $('splash-retry').hidden = true;
+  clearTimeout(splashTimer);
+  splashTimer = setTimeout(() => { // 長くかかっている時は再読み込みを出す
+    $('splash-sub').textContent = '時間がかかっています…'; $('splash-retry').hidden = false;
+  }, 20000);
+  frame.src = CONFIG.APP_URL + (CONFIG.APP_URL.indexOf('?') >= 0 ? '&' : '?') + 'shell=1';
+}
+function hideSplash(){ clearTimeout(splashTimer); $('splash').hidden = true; }
+
+/* 送り主が、このページの iframe の中のアプリ本体かを確かめる */
+function fromOurApp(ev){
+  if(!CONFIG.APP_ORIGIN.test(ev.origin)) return false;
+  let w = ev.source;
+  for(let i = 0; i < 4 && w; i++){
+    if(w === frame.contentWindow) return true;
+    try{ if(w === w.parent) break; w = w.parent; }catch(e){ return false; }
+  }
+  return false;
+}
+function send(m){ if(appWin) appWin.postMessage(Object.assign({ kyudo: 1 }, m), appOrigin); }
+
+window.addEventListener('message', ev => {
+  const m = ev.data;
+  if(!m || m.kyudo !== 1 || !fromOurApp(ev)) return;
+  appWin = ev.source; appOrigin = ev.origin;
+  switch(m.type){
+    case 'hello':         hideSplash(); send({ type: 'auth', session: getSession() }); break;
+    case 'need-login':    showLogin(''); break;
+    case 'session':       setSession(m.session); hideLogin(); break;
+    case 'clear-session': setSession(''); break;
+    case 'login-error':   showLogin(m.message || 'ログインできませんでした'); break;
+    case 'logout':
+      setSession('');
+      try{ google.accounts.id.disableAutoSelect(); }catch(e){}
+      reloadApp(); break;
+  }
+});
+
+/* ---- Googleログイン ---- */
+function initGsi(){
+  if(gsiReady) return true;
+  if(!(window.google && google.accounts && google.accounts.id)) return false;
+  google.accounts.id.initialize({
+    client_id: CONFIG.CLIENT_ID,
+    callback: r => {
+      if(!r || !r.credential) return;
+      $('login-msg').style.color = 'rgba(255,255,255,.8)';
+      $('login-msg').textContent = '確認しています…';
+      send({ type: 'idtoken', idToken: r.credential });
+    },
+    auto_select: true,          // 2回目からは自動でログイン
+    itp_support: true,
+    use_fedcm_for_prompt: true,
+    cancel_on_tap_outside: false
+  });
+  google.accounts.id.renderButton($('gbtn'), { theme: 'filled_blue', size: 'large', shape: 'pill', text: 'signin_with', locale: 'ja', width: 260 });
+  gsiReady = true;
+  return true;
+}
+function showLogin(msg){
+  hideSplash();
+  $('login').hidden = false;
+  $('login-msg').style.color = '#fecaca';
+  $('login-msg').textContent = msg || '';
+  const tryInit = (n) => {
+    if(initGsi()){ try{ google.accounts.id.prompt(); }catch(e){} return; }
+    if(n > 100){ $('login-msg').textContent = 'ログイン部品を読み込めませんでした。再読み込みしてください。'; return; }
+    setTimeout(() => tryInit(n + 1), 150);
+  };
+  tryInit(0);
+}
+function hideLogin(){ $('login').hidden = true; }
+
+/* ---- オフライン ---- */
+window.addEventListener('online', () => { if(!$('offline').hidden) reloadApp(); });
+window.addEventListener('offline', () => { if(!appWin) $('offline').hidden = false; });
+
+/* ---- PWA（オフラインでも外枠だけは開けるようにする） ---- */
+if('serviceWorker' in navigator){
+  window.addEventListener('load', () => { navigator.serviceWorker.register('sw.js').catch(() => {}); });
+}
+
+reloadApp();
+</script>
+<script src="https://accounts.google.com/gsi/client" async></script>
+</body>
+</html>
