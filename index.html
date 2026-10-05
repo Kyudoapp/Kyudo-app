@@ -49,6 +49,14 @@
   <div class="msg" id="login-msg"></div>
 </div>
 
+<div class="layer" id="pushask" hidden style="background:rgba(10,18,40,.94)">
+  <img src="icons/icon-192.png" alt="">
+  <div class="ttl" id="pushask-title">通知を受け取りますか？</div>
+  <div class="sub">部室の返信・アドバイス、お知らせ、<br>道場当番の前の連絡が、この端末に届きます。<br>届く内容はアプリの「設定」で選べます。</div>
+  <button class="btn" style="background:#fff;color:#1a2744;font-weight:700;padding:12px 28px" onclick="pushSubscribe()">通知を受け取る</button>
+  <button class="btn" onclick="pushLater()">あとで</button>
+</div>
+
 <div class="layer" id="offline" hidden>
   <img src="icons/icon-192.png" alt="">
   <div class="ttl">オフラインです</div>
@@ -153,6 +161,9 @@ window.addEventListener('message', ev => {
     case 'session':       setSession(m.session); hideLogin(); break;
     case 'clear-session': setSession(''); break;
     case 'login-error':   showLogin(m.message || 'ログインできませんでした'); break;
+    case 'push-status':   pushStatus(); break;
+    case 'push-setup':    pushSetup(m); break;
+    case 'push-off':      pushOff(); break;
     case 'logout':
       setSession(''); appStoreClear(); // 次に別の人が使っても前の人のデータが残らないように
       try{ google.accounts.id.disableAutoSelect(); }catch(e){}
@@ -194,6 +205,91 @@ function showLogin(msg){
   tryInit(0);
 }
 function hideLogin(){ $('login').hidden = true; }
+
+/* ---- アプリの通知（プッシュ） ----
+   通知の許可と端末の登録はこのページ（ホーム画面アプリ本体）で行う。
+   登録した宛先はアプリ本体に渡し、サーバーに保存してもらう。 */
+const PUSH_ASKED = 'push_asked_at', PUSH_SYNCED = 'push_synced_at';
+const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const isStandalone = () => (window.matchMedia && matchMedia('(display-mode: standalone)').matches) || navigator.standalone === true;
+const pushSupported = () => ('serviceWorker' in navigator) && ('PushManager' in window) && ('Notification' in window);
+let pushKey = '';
+function within(p, ms){ return Promise.race([p, new Promise((_, rj) => setTimeout(() => rj(new Error('timeout')), ms))]); }
+function lsNum(k){ try{ return +localStorage.getItem(k) || 0; }catch(e){ return 0; } }
+function lsSet(k, v){ try{ localStorage.setItem(k, String(v)); }catch(e){} }
+function b64uToU8(s){
+  s = s.replace(/-/g, '+').replace(/_/g, '/'); s += '==='.slice((s.length + 3) % 4);
+  const b = atob(s), u = new Uint8Array(b.length);
+  for(let i = 0; i < b.length; i++) u[i] = b.charCodeAt(i);
+  return u;
+}
+function sameKey(sub, key){
+  try{
+    const a = new Uint8Array(sub.options.applicationServerKey);
+    return a.length === key.length && a.every((x, i) => x === key[i]);
+  }catch(e){ return true; }
+}
+function deviceName(){
+  const ua = navigator.userAgent;
+  const os = isIOS ? 'iPhone' : /Android/.test(ua) ? 'Android' : /Mac/.test(ua) ? 'Mac' : /Windows/.test(ua) ? 'Windows' : 'その他';
+  return os + (isStandalone() ? '・アプリ' : '・ブラウザ');
+}
+async function pushStatus(){
+  const o = { type: 'push-status', supported: pushSupported(), ios: isIOS, standalone: isStandalone(),
+    permission: ('Notification' in window) ? Notification.permission : 'unsupported',
+    subscribed: false, recentlyAsked: Date.now() - lsNum(PUSH_ASKED) < 14 * 864e5, resync: false, device: deviceName() };
+  if(o.supported){
+    try{
+      const reg = await within(navigator.serviceWorker.ready, 6000);
+      const sub = await reg.pushManager.getSubscription();
+      if(sub){
+        o.subscribed = true; o.sub = sub.toJSON();
+        if(Date.now() - lsNum(PUSH_SYNCED) > 7 * 864e5){ o.resync = true; lsSet(PUSH_SYNCED, Date.now()); }
+      }
+    }catch(e){ o.supported = false; }
+  }
+  send(o);
+}
+function pushSetup(m){
+  pushKey = m.publicKey || '';
+  if(!pushKey || !pushSupported()) return;
+  if(m.silent && Notification.permission === 'granted'){ pushSubscribe(true); return; } // 許可済みなら黙って登録
+  $('pushask-title').textContent = m.offer ? '通知を受け取りますか？' : 'この端末で通知を受け取る';
+  hideSplash(); $('pushask').hidden = false;
+}
+async function pushSubscribe(silent){
+  $('pushask').hidden = true;
+  try{
+    // 許可の確認は、ボタンを押した直後に行う必要がある（iPhone）
+    const perm = Notification.permission === 'granted' ? 'granted' : await Notification.requestPermission();
+    if(perm !== 'granted'){
+      lsSet(PUSH_ASKED, Date.now());
+      send({ type: 'push-result', ok: false, message: perm === 'denied' ? '通知がブロックされました。端末の設定から許可できます' : '通知はオフのままです' });
+      return;
+    }
+    const reg = await within(navigator.serviceWorker.ready, 8000);
+    const key = b64uToU8(pushKey);
+    let sub = await reg.pushManager.getSubscription();
+    if(sub && !sameKey(sub, key)){ await sub.unsubscribe(); sub = null; } // 送信元の鍵が変わっていたら登録し直す
+    if(!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key });
+    lsSet(PUSH_SYNCED, Date.now());
+    send({ type: 'push-sub', sub: sub.toJSON(), device: deviceName(), quiet: !!silent });
+  }catch(e){
+    if(!silent) send({ type: 'push-result', ok: false, message: '通知の登録に失敗しました（' + ((e && e.message) || e) + '）' });
+  }
+}
+function pushLater(){
+  $('pushask').hidden = true; lsSet(PUSH_ASKED, Date.now());
+  send({ type: 'push-result', ok: false, message: '' });
+}
+async function pushOff(){
+  try{
+    const reg = await within(navigator.serviceWorker.ready, 6000);
+    const sub = await reg.pushManager.getSubscription();
+    if(sub){ const ep = sub.endpoint; await sub.unsubscribe(); send({ type: 'push-unsub', endpoint: ep }); return; }
+  }catch(e){}
+  send({ type: 'push-unsub', endpoint: '' });
+}
 
 /* ---- オフライン ---- */
 window.addEventListener('online', () => { if(!$('offline').hidden) reloadApp(); });
