@@ -1,9 +1,9 @@
 /* 外枠アプリのファイルを端末に保存して、すぐ開けるようにする。
    アプリ本体（GAS）や Google のログイン部品には触らない。
    外枠を更新したら CACHE の番号を1つ上げる。 */
-const CACHE = 'kyudo-shell-v3';
+const CACHE = 'kyudo-shell-v4';
 const FILES = ['./', './index.html', './manifest.webmanifest',
-  './icons/icon-192.png', './icons/icon-512.png', './icons/icon-maskable-512.png', './icons/apple-touch-icon.png'];
+  './icons/icon-192.png', './icons/icon-512.png', './icons/icon-maskable-512.png', './icons/apple-touch-icon.png', './icons/badge-72.png'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(FILES)).then(() => self.skipWaiting()));
@@ -22,5 +22,23 @@ self.addEventListener('fetch', e => {
     const hit = await c.match(req, { ignoreSearch: true });
     const net = fetch(req).then(r => { if(r && r.ok) c.put(req, r.clone()); return r; }).catch(() => hit);
     return hit || net;
+  }));
+});
+
+/* ---- アプリの通知（サーバーから届いた物を表示する） ---- */
+self.addEventListener('push', e => {
+  let d = {};
+  try{ d = e.data ? e.data.json() : {}; }catch(_){ d = { body: e.data ? e.data.text() : '' }; }
+  const opt = { body: d.body || '', icon: 'icons/icon-192.png', badge: 'icons/badge-72.png', data: { url: d.url || './' } };
+  if(d.tag){ opt.tag = d.tag + '-' + Date.now(); } // 同じ種類でも1件ずつ並べる
+  e.waitUntil(self.registration.showNotification(d.title || '農工大弓道部', opt));
+});
+/* 通知をタップしたらアプリを開く（開いていれば前に出す） */
+self.addEventListener('notificationclick', e => {
+  e.notification.close();
+  const url = new URL((e.notification.data && e.notification.data.url) || './', self.registration.scope).href;
+  e.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(list => {
+    for(const c of list){ if(c.url.indexOf(self.registration.scope) === 0 && 'focus' in c) return c.focus(); }
+    return self.clients.openWindow(url);
   }));
 });
