@@ -1,7 +1,7 @@
 /* 外枠アプリのファイルを端末に保存して、すぐ開けるようにする。
    アプリ本体（GAS）や Google のログイン部品には触らない。
    外枠を更新したら CACHE の番号を1つ上げる。 */
-const CACHE = 'kyudo-shell-v8';
+const CACHE = 'kyudo-shell-v9';
 const FILES = ['./', './index.html', './manifest.webmanifest',
   './k2-192.png', './k2-512.png', './k2-maskable-512.png', './k2-apple-180.png', './k2-badge-72.png'];
 
@@ -22,7 +22,8 @@ self.addEventListener('fetch', e => {
   if(url.origin !== self.location.origin) return;
   const fresh = req.mode === 'navigate' || /\.(webmanifest|html)$/.test(url.pathname) || url.pathname.endsWith('/');
   if(fresh){
-    e.respondWith(fetch(req, { cache: 'no-cache' }).then(r => {
+    // ページの読込(navigate)はそのまま設定を付け直せないので、同じURLで作り直して取りに行く
+    e.respondWith(fetch(new Request(req.url, { cache: 'no-cache', credentials: 'same-origin' })).then(r => {
       if(r && r.ok){ const c = r.clone(); caches.open(CACHE).then(ca => ca.put(req, c)); }
       return r;
     }).catch(() => caches.match(req, { ignoreSearch: true })));
