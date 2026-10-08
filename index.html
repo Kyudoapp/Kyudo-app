@@ -330,8 +330,14 @@ function setBadge(n){
   try{
     n = Math.max(0, Math.min(99, +n || 0));
     badgeStore(n); // 通知が届いた時に続きから数えられるように覚えておく
-    if(!('setAppBadge' in navigator)) return;
-    if(n > 0) navigator.setAppBadge(n).catch(() => {}); else navigator.clearAppBadge().catch(() => {});
+    // 画面からの設定（パソコンなど）
+    if('setAppBadge' in navigator){
+      if(n > 0) navigator.setAppBadge(n).catch(() => {}); else navigator.clearAppBadge().catch(() => {});
+    }
+    // iPhoneは画面からの消去が効かないことがあるので、通知の受け取り役(sw.js)にも同じ数を頼む
+    if('serviceWorker' in navigator){
+      navigator.serviceWorker.ready.then(reg => { if(reg.active) reg.active.postMessage({ kyudo: 1, type: 'badge', count: n }); }).catch(() => {});
+    }
   }catch(e){}
 }
 /* アイコンの数字を、外枠と通知の受け取り役(sw.js)の両方から読める場所に保存する */

@@ -1,7 +1,7 @@
 /* 外枠アプリのファイルを端末に保存して、すぐ開けるようにする。
    アプリ本体（GAS）や Google のログイン部品には触らない。
    外枠を更新したら CACHE の番号を1つ上げる。 */
-const CACHE = 'kyudo-shell-v14';
+const CACHE = 'kyudo-shell-v15';
 const FILES = ['./', './index.html', './manifest.webmanifest',
   './k2-192.png', './k2-512.png', './k2-maskable-512.png', './k2-apple-180.png', './k2-badge-72.png'];
 
@@ -58,6 +58,21 @@ async function bumpBadge(fromServer){
     if(self.navigator && 'setAppBadge' in self.navigator) await self.navigator.setAppBadge(n);
   }catch(e){}
 }
+/* 外枠から「アイコンの数字をこの数に」と頼まれた時（アプリで読んだ時など） */
+self.addEventListener('message', e => {
+  const m = e.data;
+  if(!m || m.kyudo !== 1 || m.type !== 'badge') return;
+  const n = Math.max(0, Math.min(99, +m.count || 0));
+  e.waitUntil((async () => {
+    try{
+      const c = await caches.open('kyudo-badge');
+      await c.put('./__badge', new Response(String(n)));
+      if(self.navigator && 'setAppBadge' in self.navigator){
+        if(n > 0) await self.navigator.setAppBadge(n); else await self.navigator.clearAppBadge();
+      }
+    }catch(err){}
+  })());
+});
 /* 通知をタップしたらアプリを開く（開いていれば前に出す） */
 self.addEventListener('notificationclick', e => {
   e.notification.close();
