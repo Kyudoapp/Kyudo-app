@@ -11,7 +11,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="弓道部">
+<meta name="apple-mobile-web-app-title" content="農工大弓道部">
 <style>
   *{box-sizing:border-box;margin:0;padding:0}
   html,body{height:100%;background:#161618;overflow:hidden}
@@ -31,7 +31,7 @@
 <body>
 <!-- credentialless: スマホに入っているGoogleアカウントの情報をアプリ本体に送らない
      （大学アカウントの組織設定や複数ログインで「ファイルを開くことができません」になるのを防ぐ） -->
-<iframe id="app" title="農工大弓道部" allow="microphone; clipboard-write" credentialless></iframe>
+<iframe id="app" title="農工大弓道部" allow="microphone; clipboard-write; autoplay; fullscreen; picture-in-picture; encrypted-media" allowfullscreen credentialless></iframe>
 <div id="dbg" hidden style="position:fixed;left:0;right:0;bottom:0;max-height:40%;overflow:auto;background:rgba(0,0,0,.85);color:#a7f3d0;font:11px/1.5 monospace;padding:6px 8px;z-index:50;white-space:pre-wrap"></div>
 
 <div class="layer" id="splash">
@@ -169,11 +169,12 @@ window.addEventListener('message', ev => {
     case 'session':       setSession(m.session); hideLogin(); break;
     case 'clear-session': setSession(''); break;
     case 'login-error':   showLogin(m.message || 'ログインできませんでした'); break;
+    case 'badge':         setBadge(m.count); break;
     case 'push-status':   pushStatus(); break;
     case 'push-setup':    pushSetup(m); break;
     case 'push-off':      pushOff(); break;
     case 'logout':
-      setSession(''); appStoreClear(); // 次に別の人が使っても前の人のデータが残らないように
+      setSession(''); appStoreClear(); setBadge(0); // 次に別の人が使っても前の人のデータが残らないように
       try{ google.accounts.id.disableAutoSelect(); }catch(e){}
       reloadApp(); break;
   }
@@ -323,6 +324,15 @@ async function doInstall(){
   bip = null;
 }
 function closeInstall(){ $('installbar').hidden = true; lsSet('install_closed', Date.now()); }
+
+/* ---- アイコンの右上の数（未読のお知らせ）。iPhone・iPad（ホーム画面のアプリ）、パソコンで表示される ---- */
+function setBadge(n){
+  try{
+    n = Math.max(0, Math.min(99, +n || 0));
+    if(!('setAppBadge' in navigator)) return;
+    if(n > 0) navigator.setAppBadge(n).catch(() => {}); else navigator.clearAppBadge().catch(() => {});
+  }catch(e){}
+}
 
 /* ---- オフライン ---- */
 window.addEventListener('online', () => { if(!$('offline').hidden) reloadApp(); });
