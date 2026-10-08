@@ -1,7 +1,7 @@
 /* 外枠アプリのファイルを端末に保存して、すぐ開けるようにする。
    アプリ本体（GAS）や Google のログイン部品には触らない。
    外枠を更新したら CACHE の番号を1つ上げる。 */
-const CACHE = 'kyudo-shell-v12';
+const CACHE = 'kyudo-shell-v14';
 const FILES = ['./', './index.html', './manifest.webmanifest',
   './k2-192.png', './k2-512.png', './k2-maskable-512.png', './k2-apple-180.png', './k2-badge-72.png'];
 
@@ -41,13 +41,23 @@ self.addEventListener('push', e => {
   try{ d = e.data ? e.data.json() : {}; }catch(_){ d = { body: e.data ? e.data.text() : '' }; }
   const opt = { body: d.body || '', icon: 'k2-192.png', badge: 'k2-badge-72.png', data: { url: d.url || './' } };
   if(d.tag){ opt.tag = d.tag + '-' + Date.now(); } // 同じ種類でも1件ずつ並べる
-  const jobs = [self.registration.showNotification(d.title || '農工大弓道部', opt)];
-  // アイコンの右上の数（対応している端末だけ）
-  if(typeof d.badge === 'number' && self.navigator && 'setAppBadge' in self.navigator){
-    jobs.push(self.navigator.setAppBadge(d.badge).catch(() => {}));
-  }
-  e.waitUntil(Promise.all(jobs));
+  e.waitUntil(Promise.all([
+    self.registration.showNotification(d.title || '農工大弓道部', opt),
+    bumpBadge(d.badge)
+  ]));
 });
+/* アイコンの右上の数字：サーバーが数えた未読数があればそれを、無ければ覚えている数に1足す */
+async function bumpBadge(fromServer){
+  try{
+    const c = await caches.open('kyudo-badge');
+    let n = 0;
+    const r = await c.match('./__badge'); if(r) n = parseInt(await r.text(), 10) || 0;
+    n = (typeof fromServer === 'number') ? Math.max(fromServer, n + 1) : n + 1;
+    n = Math.min(99, n);
+    await c.put('./__badge', new Response(String(n)));
+    if(self.navigator && 'setAppBadge' in self.navigator) await self.navigator.setAppBadge(n);
+  }catch(e){}
+}
 /* 通知をタップしたらアプリを開く（開いていれば前に出す） */
 self.addEventListener('notificationclick', e => {
   e.notification.close();

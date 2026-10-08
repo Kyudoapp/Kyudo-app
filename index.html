@@ -329,10 +329,13 @@ function closeInstall(){ $('installbar').hidden = true; lsSet('install_closed', 
 function setBadge(n){
   try{
     n = Math.max(0, Math.min(99, +n || 0));
+    badgeStore(n); // 通知が届いた時に続きから数えられるように覚えておく
     if(!('setAppBadge' in navigator)) return;
     if(n > 0) navigator.setAppBadge(n).catch(() => {}); else navigator.clearAppBadge().catch(() => {});
   }catch(e){}
 }
+/* アイコンの数字を、外枠と通知の受け取り役(sw.js)の両方から読める場所に保存する */
+function badgeStore(n){ try{ caches.open('kyudo-badge').then(c => c.put('./__badge', new Response(String(n)))).catch(() => {}); }catch(e){} }
 
 /* ---- オフライン ---- */
 window.addEventListener('online', () => { if(!$('offline').hidden) reloadApp(); });
