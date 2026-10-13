@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,interactive-widget=resizes-content">
 <title>農工大弓道部</title>
 <meta name="theme-color" content="#161618">
 <link rel="manifest" href="manifest.webmanifest">
@@ -263,6 +263,7 @@ function pushSetup(m){
   pushKey = m.publicKey || '';
   if(!pushKey || !pushSupported()) return;
   if(m.silent && Notification.permission === 'granted'){ pushSubscribe(true); return; } // 許可済みなら黙って登録
+  if(m.offer && typingInApp()){ setTimeout(() => pushSetup(m), 15000); return; } // 入力中に画面を覆わない
   $('pushask-title').textContent = m.offer ? '通知を受け取りますか？' : 'この端末で通知を受け取る';
   hideSplash(); $('pushask').hidden = false;
 }
@@ -305,7 +306,8 @@ let bip = null;
 window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); bip = e; setTimeout(maybeShowInstall, 1500); });
 window.addEventListener('appinstalled', () => { $('installbar').hidden = true; bip = null; });
 function maybeShowInstall(){
-  if(isStandalone() || !appWin) return;                       // もうアプリとして開いている／まだ読み込み中
+  if(isStandalone() || !appWin) return;
+  if(typingInApp()){ setTimeout(maybeShowInstall, 15000); return; } // 入力中は後にする                       // もうアプリとして開いている／まだ読み込み中
   if(Date.now() - lsNum('install_closed') < 7 * 864e5) return; // 閉じてから1週間は出さない
   const ua = navigator.userAgent;
   let text = '', btn = false;
@@ -342,6 +344,20 @@ function setBadge(n){
 }
 /* アイコンの数字を、外枠と通知の受け取り役(sw.js)の両方から読める場所に保存する */
 function badgeStore(n){ try{ caches.open('kyudo-badge').then(c => c.put('./__badge', new Response(String(n)))).catch(() => {}); }catch(e){} }
+
+/* ---- キーボードが出た時：表示できる高さに合わせてアプリの枠を縮める（iPhoneなど） ---- */
+function fitFrame(){
+  const vv = window.visualViewport;
+  if(!vv) return;
+  const kb = window.innerHeight - vv.height; // キーボードなどで隠れている高さ
+  frame.style.height = kb > 60 ? (vv.height - frame.getBoundingClientRect().top + vv.offsetTop) + 'px' : '';
+}
+if(window.visualViewport){
+  visualViewport.addEventListener('resize', fitFrame);
+  visualViewport.addEventListener('scroll', fitFrame);
+}
+/* アプリで文字を入力している間は、案内（インストール・通知）を出さない */
+function typingInApp(){ return document.activeElement === frame; }
 
 /* ---- オフライン ---- */
 window.addEventListener('online', () => { if(!$('offline').hidden) reloadApp(); });
