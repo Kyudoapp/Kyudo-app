@@ -16,7 +16,8 @@
   *{box-sizing:border-box;margin:0;padding:0}
   html,body{height:100%;background:#161618;overflow:hidden}
   body{font-family:-apple-system,'Hiragino Sans','Noto Sans JP',sans-serif;color:#fff}
-  #app{position:fixed;left:0;right:0;bottom:0;top:env(safe-area-inset-top,0px);width:100%;height:calc(100% - env(safe-area-inset-top,0px));border:0;background:#f0eeeb}
+  #app{position:fixed;left:0;right:0;bottom:0;top:env(safe-area-inset-top,0px);width:100%;height:calc(100% - env(safe-area-inset-top,0px));border:0;background:#f2f2f4}
+  @media (prefers-color-scheme: dark){ #app{background:#0e1014} }
   .layer{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;background:#161618;padding:24px;text-align:center;z-index:10}
   .layer[hidden]{display:none}
   [hidden]{display:none !important} /* style に display を書いた要素も、hidden で確実に隠す */
@@ -104,26 +105,80 @@ function showDiag(){
     ' / ' + ('credentialless' in HTMLIFrameElement.prototype ? 'CL対応' : 'CL非対応') +
     (diag.err.length ? ' / エラー ' + diag.err.slice(-2).join(' | ') : '');
 }
-/* アプリ本体の保存内容（外枠の端末保存に置いておく） */
-function appStore(){
-  const o = {};
+/* アプリ本体の保存内容（外枠の端末に置いておく）
+   以前は localStorage（iPhoneで約5MBまで）に置いていたが、データが増えると入りきらなくなるので、
+   ずっと大きく使える IndexedDB に置く。使えない端末では、これまで通り localStorage に置く */
+let STORE = {};                  // 画面を開いている間の写し（読む時はここから）
+let IDB = null;
+const storeReady = new Promise(res => {
+  const done = () => res();
+  try{
+    const rq = indexedDB.open('kyudo-app', 1);
+    rq.onupgradeneeded = () => { rq.result.createObjectStore('kv'); };
+    rq.onsuccess = () => {
+      IDB = rq.result;
+      const tx = IDB.transaction('kv', 'readonly'), os = tx.objectStore('kv');
+      const kr = os.getAllKeys(), vr = os.getAll();
+      tx.oncomplete = () => {
+        (kr.result || []).forEach((k, i) => { STORE[k] = vr.result[i]; });
+        // 以前 localStorage に置いていた分を引っ越す（一度だけ）
+        try{
+          const moved = [];
+          for(let i = 0; i < localStorage.length; i++){
+            const k = localStorage.key(i);
+            if(k && k.indexOf(APFX) === 0){ const kk = k.slice(APFX.length); if(!(kk in STORE)) STORE[kk] = localStorage.getItem(k); moved.push(k); }
+          }
+          if(moved.length){
+            const tw = IDB.transaction('kv', 'readwrite'), ow = tw.objectStore('kv');
+            Object.keys(STORE).forEach(k => ow.put(STORE[k], k));
+            tw.oncomplete = () => { moved.forEach(k => { try{ localStorage.removeItem(k); }catch(e){} }); };
+          }
+        }catch(e){}
+        done();
+      };
+      tx.onerror = () => { IDB = null; loadFromLS(); done(); };
+    };
+    rq.onerror = () => { IDB = null; loadFromLS(); done(); };
+    setTimeout(() => { if(!IDB){ loadFromLS(); done(); } }, 3000); // 開けない端末で待ち続けない
+  }catch(e){ loadFromLS(); done(); }
+});
+function loadFromLS(){
   try{
     for(let i = 0; i < localStorage.length; i++){
       const k = localStorage.key(i);
-      if(k && k.indexOf(APFX) === 0) o[k.slice(APFX.length)] = localStorage.getItem(k);
+      if(k && k.indexOf(APFX) === 0 && !(k.slice(APFX.length) in STORE)) STORE[k.slice(APFX.length)] = localStorage.getItem(k);
     }
   }catch(e){}
-  return o;
 }
+function appStore(){ return Object.assign({}, STORE); }
 function appStoreSet(k, v){
   if(typeof k !== 'string' || !k || k.length > 100) return;
+  if(v == null) delete STORE[k]; else STORE[k] = String(v);
+  if(IDB){
+    try{
+      const tx = IDB.transaction('kv', 'readwrite'), os = tx.objectStore('kv');
+      v == null ? os.delete(k) : os.put(String(v), k);
+      tx.onerror = () => { lsSet(k, v); logDbg('IDB書き込み失敗 ' + k); };
+      return;
+    }catch(e){}
+  }
+  lsSet(k, v);
+}
+function lsSet(k, v){
   try{ v == null ? localStorage.removeItem(APFX + k) : localStorage.setItem(APFX + k, String(v)); }
   catch(e){ // 容量オーバー：大きいキャッシュだけ諦める（データ本体はサーバーにある）
     if(k === 'kudo_cache'){ try{ localStorage.removeItem(APFX + k); }catch(_){} }
     logDbg('store失敗 ' + k);
   }
 }
-function appStoreClear(){ Object.keys(appStore()).forEach(k => { try{ localStorage.removeItem(APFX + k); }catch(e){} }); }
+function appStoreClear(){
+  STORE = {};
+  if(IDB){ try{ IDB.transaction('kv', 'readwrite').objectStore('kv').clear(); }catch(e){} }
+  try{
+    const ks = [];for(let i = 0; i < localStorage.length; i++){ const k = localStorage.key(i); if(k && k.indexOf(APFX) === 0) ks.push(k); }
+    ks.forEach(k => localStorage.removeItem(k));
+  }catch(e){}
+}
 
 function $(id){ return document.getElementById(id); }
 function getSession(){ try{ return localStorage.getItem(SKEY) || ''; }catch(e){ return ''; } }
@@ -162,7 +217,7 @@ window.addEventListener('message', ev => {
   if(m.type !== 'store') logDbg('受信 ' + m.type + (m.message ? ' ' + m.message : ''));
   appWin = ev.source; appOrigin = ev.origin;
   switch(m.type){
-    case 'hello':         hideSplash(); send({ type: 'auth', session: getSession(), store: appStore() }); setTimeout(maybeShowInstall, 4000); break;
+    case 'hello':         storeReady.then(() => { hideSplash(); send({ type: 'auth', session: getSession(), store: appStore() }); }); setTimeout(maybeShowInstall, 4000); break;
     case 'store':         appStoreSet(m.key, m.value); break;
     case 'error':         diag.err.push(String(m.message || '').slice(0, 120)); break;
     case 'need-login':    showLogin(''); break;
