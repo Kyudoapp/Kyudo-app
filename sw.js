@@ -1,7 +1,7 @@
 /* 外枠アプリのファイルを端末に保存して、すぐ開けるようにする。
    アプリ本体（GAS）や Google のログイン部品には触らない。
    外枠を更新したら CACHE の番号を1つ上げる。 */
-const CACHE = 'kyudo-shell-v17';
+const CACHE = 'kyudo-shell-v18';
 const FILES = ['./', './index.html', './manifest.webmanifest',
   './k2-192.png', './k2-512.png', './k2-maskable-512.png', './k2-apple-180.png', './k2-badge-72.png'];
 
@@ -82,3 +82,20 @@ self.addEventListener('notificationclick', e => {
     return self.clients.openWindow(url);
   }));
 });
+
+/* ---- アプリを閉じていても、電波が戻ったら送っていない変更を届ける（Android） ---- */
+function kvGet(db, k){ return new Promise(res => { try{ const r = db.transaction('kv', 'readonly').objectStore('kv').get(k); r.onsuccess = () => res(r.result); r.onerror = () => res(null); }catch(e){ res(null); } }); }
+function kvDel(db, k){ return new Promise(res => { try{ const tx = db.transaction('kv', 'readwrite'); tx.objectStore('kv').delete(k); tx.oncomplete = () => res(); tx.onerror = () => res(); }catch(e){ res(); } }); }
+function openKv(){ return new Promise((res, rej) => { const r = indexedDB.open('kyudo-app', 1); r.onupgradeneeded = () => r.result.createObjectStore('kv'); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); }); }
+async function flushPending(){
+  const db = await openKv();
+  const raw = await kvGet(db, 'kudo_pending'), tok = await kvGet(db, '_session'), url = await kvGet(db, '_appurl');
+  if(!raw || !tok || !url) return;
+  const p = JSON.parse(raw);
+  const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify({ fn: 'save', token: tok, data: JSON.stringify(p.delta) }), redirect: 'follow' });
+  const j = await r.json();
+  if(!j || j.ok === false) throw new Error('not saved'); // もう一度、電波が戻った時に試してもらう
+  if((await kvGet(db, 'kudo_pending')) === raw) await kvDel(db, 'kudo_pending');
+}
+self.addEventListener('sync', e => { if(e.tag === 'kyudo-sync') e.waitUntil(flushPending()); });

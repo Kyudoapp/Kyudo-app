@@ -151,9 +151,46 @@ function loadFromLS(){
   }catch(e){}
 }
 function appStore(){ return Object.assign({}, STORE); }
+/* 控えは、IndexedDB と localStorage のうち新しい方を使う */
+function pendingFix(){
+  try{
+    const a = STORE.kudo_pending, b = localStorage.getItem(APFX + 'kudo_pending');
+    const ta = a ? (JSON.parse(a).t || 0) : 0, tb = b ? (JSON.parse(b).t || 0) : 0;
+    if(tb > ta){ STORE.kudo_pending = b; if(IDB){ try{ IDB.transaction('kv', 'readwrite').objectStore('kv').put(b, 'kudo_pending'); }catch(e){} } }
+  }catch(e){}
+}
+storeReady.then(pendingFix);
+/* ---- 外枠から直接送る（アプリを開けないほど電波が弱い時・アプリを閉じた後） ---- */
+let shellSyncT = null, shellSyncing = false;
+function idbPut(k, v){ if(!IDB) return; try{ const os = IDB.transaction('kv', 'readwrite').objectStore('kv'); v == null ? os.delete(k) : os.put(v, k); }catch(e){} }
+async function shellSync(){
+  if(shellSyncing) return;
+  const raw = STORE.kudo_pending, tok = getSession();
+  if(!raw || !tok) return;
+  let p; try{ p = JSON.parse(raw); }catch(e){ return; }
+  if(!p || !p.delta) return;
+  shellSyncing = true;
+  try{
+    const r = await fetch(CONFIG.APP_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ fn: 'save', token: tok, data: JSON.stringify(p.delta) }), redirect: 'follow' });
+    const j = await r.json();
+    if(j && j.ok !== false && STORE.kudo_pending === raw){ appStoreSet('kudo_pending', null); send({ type: 'pending-done', t: p.t }); }
+  }catch(e){}
+  shellSyncing = false;
+}
+function bgSyncRegister(){ // Android：アプリを閉じていても、電波が戻ったら裏で送る
+  try{ navigator.serviceWorker && navigator.serviceWorker.ready.then(reg => { if(reg.sync) reg.sync.register('kyudo-sync').catch(() => {}); }); }catch(e){}
+}
+storeReady.then(() => { idbPut('_appurl', CONFIG.APP_URL); idbPut('_session', getSession() || null); setTimeout(shellSync, 15000); });
+setInterval(() => { if(STORE.kudo_pending) shellSync(); }, 60000);
+window.addEventListener('online', () => setTimeout(shellSync, 20000));
 function appStoreSet(k, v){
   if(typeof k !== 'string' || !k || k.length > 100) return;
   if(v == null) delete STORE[k]; else STORE[k] = String(v);
+  if(k === 'kudo_pending'){ // 一番大事な控え：その場で2か所に書き、電波が戻ったら外枠からも送る
+    try{ v == null ? localStorage.removeItem(APFX + k) : localStorage.setItem(APFX + k, String(v)); }catch(e){}
+    if(v != null){ bgSyncRegister(); clearTimeout(shellSyncT); shellSyncT = setTimeout(shellSync, 45000); }
+  }
   if(IDB){
     try{
       const tx = IDB.transaction('kv', 'readwrite'), os = tx.objectStore('kv');
@@ -182,12 +219,14 @@ function appStoreClear(){
 
 function $(id){ return document.getElementById(id); }
 function getSession(){ try{ return localStorage.getItem(SKEY) || ''; }catch(e){ return ''; } }
-function setSession(v){ try{ v ? localStorage.setItem(SKEY, v) : localStorage.removeItem(SKEY); }catch(e){} }
+function setSession(v){ try{ v ? localStorage.setItem(SKEY, v) : localStorage.removeItem(SKEY); }catch(e){} try{ idbPut('_session', v || null); }catch(e){} }
 
 /* アプリ本体を読み込む */
+let loadRetryT = null;
 function reloadApp(){
-  if(!navigator.onLine){ $('offline').hidden = false; return; }
   $('offline').hidden = true; $('splash').hidden = false;
+  clearTimeout(loadRetryT);
+  loadRetryT = setTimeout(() => { if(!appWin) reloadApp(); }, navigator.onLine ? 25000 : 8000); // 読み込めない時は、何も言わずに試し直す
   $('splash-sub').textContent = '読み込み中…'; $('splash-retry').hidden = true;
   clearTimeout(splashTimer);
   splashTimer = setTimeout(() => { // 長くかかっている時は再読み込みを出す
@@ -280,7 +319,7 @@ const pushSupported = () => ('serviceWorker' in navigator) && ('PushManager' in 
 let pushKey = '';
 function within(p, ms){ return Promise.race([p, new Promise((_, rj) => setTimeout(() => rj(new Error('timeout')), ms))]); }
 function lsNum(k){ try{ return +localStorage.getItem(k) || 0; }catch(e){ return 0; } }
-function lsSet(k, v){ try{ localStorage.setItem(k, String(v)); }catch(e){} }
+function pushLsSet(k, v){ try{ localStorage.setItem(k, String(v)); }catch(e){} }
 function b64uToU8(s){
   s = s.replace(/-/g, '+').replace(/_/g, '/'); s += '==='.slice((s.length + 3) % 4);
   const b = atob(s), u = new Uint8Array(b.length);
@@ -308,7 +347,7 @@ async function pushStatus(){
       const sub = await reg.pushManager.getSubscription();
       if(sub){
         o.subscribed = true; o.sub = sub.toJSON();
-        if(Date.now() - lsNum(PUSH_SYNCED) > 7 * 864e5){ o.resync = true; lsSet(PUSH_SYNCED, Date.now()); }
+        if(Date.now() - lsNum(PUSH_SYNCED) > 7 * 864e5){ o.resync = true; pushLsSet(PUSH_SYNCED, Date.now()); }
       }
     }catch(e){ o.supported = false; }
   }
@@ -328,7 +367,7 @@ async function pushSubscribe(silent){
     // 許可の確認は、ボタンを押した直後に行う必要がある（iPhone）
     const perm = Notification.permission === 'granted' ? 'granted' : await Notification.requestPermission();
     if(perm !== 'granted'){
-      lsSet(PUSH_ASKED, Date.now());
+      pushLsSet(PUSH_ASKED, Date.now());
       send({ type: 'push-result', ok: false, message: perm === 'denied' ? '通知がブロックされました。端末の設定から許可できます' : '通知はオフのままです' });
       return;
     }
@@ -337,14 +376,14 @@ async function pushSubscribe(silent){
     let sub = await reg.pushManager.getSubscription();
     if(sub && !sameKey(sub, key)){ await sub.unsubscribe(); sub = null; } // 送信元の鍵が変わっていたら登録し直す
     if(!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key });
-    lsSet(PUSH_SYNCED, Date.now());
+    pushLsSet(PUSH_SYNCED, Date.now());
     send({ type: 'push-sub', sub: sub.toJSON(), device: deviceName(), quiet: !!silent });
   }catch(e){
     if(!silent) send({ type: 'push-result', ok: false, message: '通知の登録に失敗しました（' + ((e && e.message) || e) + '）' });
   }
 }
 function pushLater(){
-  $('pushask').hidden = true; lsSet(PUSH_ASKED, Date.now());
+  $('pushask').hidden = true; pushLsSet(PUSH_ASKED, Date.now());
   send({ type: 'push-result', ok: false, message: '' });
 }
 async function pushOff(){
@@ -380,7 +419,7 @@ async function doInstall(){
   try{ const r = await bip.userChoice; if(r && r.outcome === 'accepted') $('installbar').hidden = true; }catch(e){}
   bip = null;
 }
-function closeInstall(){ $('installbar').hidden = true; lsSet('install_closed', Date.now()); }
+function closeInstall(){ $('installbar').hidden = true; pushLsSet('install_closed', Date.now()); }
 
 /* ---- アイコンの右上の数（未読のお知らせ）。iPhone・iPad（ホーム画面のアプリ）、パソコンで表示される ---- */
 function setBadge(n){
@@ -415,8 +454,7 @@ if(window.visualViewport){
 function typingInApp(){ return document.activeElement === frame; }
 
 /* ---- オフライン ---- */
-window.addEventListener('online', () => { if(!$('offline').hidden) reloadApp(); });
-window.addEventListener('offline', () => { if(!appWin) $('offline').hidden = false; });
+window.addEventListener('online', () => { if(!appWin) reloadApp(); }); // 電波が戻ったら、すぐ読み込み直す
 
 /* ---- PWA（オフラインでも外枠だけは開けるようにする） ---- */
 if('serviceWorker' in navigator){
